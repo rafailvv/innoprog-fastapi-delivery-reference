@@ -1,0 +1,136 @@
+services:
+  proxy:
+    image: nginx:1.29-alpine
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=16m
+      - /var/run:size=1m
+    networks:
+      backend:
+        ipv4_address: 172.30.0.10
+  api:
+    build: .
+    init: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      DELIVERY_ENVIRONMENT: production
+      DELIVERY_JWT_SECRET: ${DELIVERY_JWT_SECRET:?set DELIVERY_JWT_SECRET}
+      DELIVERY_WEBHOOK_SECRET: ${DELIVERY_WEBHOOK_SECRET:?set DELIVERY_WEBHOOK_SECRET}
+      DELIVERY_DATABASE_URL: postgresql+asyncpg://delivery:delivery@postgres/delivery
+      DELIVERY_REDIS_URL: redis://redis:6379/0
+      DELIVERY_USE_IN_MEMORY_REPOSITORY: "false"
+      DELIVERY_ALLOWED_ORIGINS: '["https://app.delivery.example"]'
+      DELIVERY_ALLOWED_HOSTS: '["api.delivery.example", "localhost", "127.0.0.1"]'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    stop_grace_period: 30s
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    networks:
+      backend:
+        ipv4_address: 172.30.0.20
+  worker:
+    build: .
+    init: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    command: ["celery", "-A", "delivery_service.worker:celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    environment:
+      DELIVERY_ENVIRONMENT: production
+      DELIVERY_JWT_SECRET: ${DELIVERY_JWT_SECRET:?set DELIVERY_JWT_SECRET}
+      DELIVERY_WEBHOOK_SECRET: ${DELIVERY_WEBHOOK_SECRET:?set DELIVERY_WEBHOOK_SECRET}
+      DELIVERY_DATABASE_URL: postgresql+asyncpg://delivery:delivery@postgres/delivery
+      DELIVERY_REDIS_URL: redis://redis:6379/0
+      DELIVERY_USE_IN_MEMORY_REPOSITORY: "false"
+      DELIVERY_ALLOWED_ORIGINS: '["https://app.delivery.example"]'
+      DELIVERY_ALLOWED_HOSTS: '["api.delivery.example", "localhost", "127.0.0.1"]'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    healthcheck:
+      disable: true
+    stop_grace_period: 30s
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    networks: [backend]
+  migrate:
+    build: .
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DELIVERY_ENVIRONMENT: production
+      DELIVERY_JWT_SECRET: ${DELIVERY_JWT_SECRET:?set DELIVERY_JWT_SECRET}
+      DELIVERY_WEBHOOK_SECRET: ${DELIVERY_WEBHOOK_SECRET:?set DELIVERY_WEBHOOK_SECRET}
+      DELIVERY_DATABASE_URL: postgresql+asyncpg://delivery:delivery@postgres/delivery
+      DELIVERY_REDIS_URL: redis://redis:6379/0
+      DELIVERY_USE_IN_MEMORY_REPOSITORY: "false"
+      DELIVERY_ALLOWED_ORIGINS: '["https://app.delivery.example"]'
+      DELIVERY_ALLOWED_HOSTS: '["api.delivery.example", "localhost", "127.0.0.1"]'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    networks: [backend]
+  postgres:
+    image: postgres:16.9
+    environment:
+      POSTGRES_DB: delivery
+      POSTGRES_USER: delivery
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U delivery"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [backend]
+  redis:
+    image: redis:7.4.5-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    networks: [backend]
+
+volumes:
+  postgres-data:
+
+networks:
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
