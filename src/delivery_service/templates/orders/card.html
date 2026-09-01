@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Заказ {{ order.public_number }}</title>
+  </head>
+  <body>
+    <main>
+      <article data-order-id="{{ order.id }}" data-status="{{ order.status_code }}">
+        <header>
+          <p>Заказ {{ order.public_number }}</p>
+          <h1>{{ order.status_label }}</h1>
+        </header>
+        <dl>
+          <dt>Откуда</dt>
+          <dd>{{ order.pickup_address }}</dd>
+          <dt>Куда</dt>
+          <dd>{{ order.destination_address }}</dd>
+          <dt>Вес</dt>
+          <dd>{{ order.weight_text }}</dd>
+          <dt>Создан</dt>
+          <dd>{{ order.created_at_text }}</dd>
+        </dl>
+        <a href="{{ url_for('get_order', order_id=order.id) }}">Открыть данные заказа</a>
+      </article>
+    </main>
+  </body>
+</html>
